@@ -21,7 +21,43 @@ try:
 except AttributeError:
     clock = time.time
 
-class DS1054Z(vxi11.Instrument):
+import socket
+class HackyInstrument:
+    def __init__(self, host):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.connect((host, 5555))
+
+    def ask(self, msg):
+        #print(msg)
+        msg = msg + "\n"
+        self.socket.send(msg.encode('ascii'))
+        r = self.socket.makefile().readline().strip()
+        #print(r)
+        return r
+
+    def write(self, msg):
+        #print(msg)
+        msg = msg + "\n"
+        self.socket.send(msg.encode('ascii'))
+
+    def ask_raw(self, msg):
+        #print(msg)
+        msg = msg + b"\n"
+        self.socket.send(msg)
+        #r = self.socket.makefile('rb').readline().strip()
+        r = self.socket.recv(2 + 9)
+        #print(r)
+        if r[0:2] != b'#9':
+            raise False
+        msglen = int(r[2:2+9])
+        r2 = b""
+        while len(r2) < msglen:
+          r2 = r2 + self.socket.recv(msglen - len(r2))
+        #print(r2)
+        self.socket.recv(1) # '\n'
+        return r + r2
+
+class DS1054Z(HackyInstrument):
     """
     This class represents the oscilloscope.
 
@@ -159,6 +195,8 @@ class DS1054Z(vxi11.Instrument):
         #           127   yreference
         #
         values = values.split(',')
+        #print(values) # XXX alyssa
+        #alyssa: ['0', '2', '1200000', '1', '2.000000e-09', '1.560000e-03', '0', '2.214840e-04', '-17', '114']
         assert len(values) == 10
         fmt, typ, pnts, cnt, xref, yorig, yref  = (int(val) for val in values[:4] + values[6:7] + values[8:10])
         xinc, xorig, yinc = (float(val) for val in values[4:6] + values[7:8])
@@ -207,7 +245,7 @@ class DS1054Z(vxi11.Instrument):
         buff = self.get_waveform_bytes(channel, mode=mode)
         fmt, typ, pnts, cnt, xinc, xorig, xref, yinc, yorig, yref = self.waveform_preamble
         samples = list(struct.unpack(str(len(buff))+'B', buff))
-        samples = [(val - yorig - yref)*yinc for val in samples]
+        #samples = [(val - yorig - yref)*yinc for val in samples] # XXX alyssa hates this
         if self.mask_begin_num:
             at_begin = self.mask_begin_num[0]
             num = self.mask_begin_num[1]
@@ -313,6 +351,7 @@ class DS1054Z(vxi11.Instrument):
         pnts = wp['pnts']
         buff = b""
         max_byte_len = 250000
+        #max_byte_len = 1000000
         pos = 1
         while len(buff) < pnts:
             self.write(":WAVeform:STARt {0}".format(pos))
